@@ -25,57 +25,32 @@ ssize_t ReadFilename(char *buffer) {
     return size;
 }
 
-ssize_t WriteLine(int pipe1,
-                  int pipe2,
-                  char *line,
-                  uint64_t *line_size) {
-    line[*line_size] = '\n';
-    ++*line_size;
-
-    int pipe_to_send;
-
-    if (rand() % 100 < PROBABILITY) {
-        pipe_to_send = pipe1;
-    } else {
-        pipe_to_send = pipe2;
-    }
-
-    ssize_t written = write(pipe_to_send, line, *line_size);
-
-    *line_size = 0;
-
-    return written;
-}
-
 int32_t ProcessInput(int child1_write_pipe,
                      int child2_write_pipe) {
     char buffer[MAX_BUFFER_SIZE];
-    char line[MAX_BUFFER_SIZE];
-    uint64_t line_size = 0;
     ssize_t bytes_read = 0;
 
-    while ((bytes_read = read(STDIN_FILENO, buffer, MAX_BUFFER_SIZE - 1)) > 0) {
-        buffer[bytes_read] = '\0';
-
-        if (strcmp(buffer, EXIT_MESSAGE) == 0) {
+    while ((bytes_read = read(STDIN_FILENO, buffer, MAX_BUFFER_SIZE)) > 0) {
+        if (strncmp(buffer, EXIT_MESSAGE, sizeof(EXIT_MESSAGE) - 1) == 0) {
             break;
         }
 
-        for (ssize_t i = 0; i < bytes_read; ++i) {
-            if (buffer[i] == '\n'
-             || line_size + 1 >= MAX_BUFFER_SIZE) {
-                WriteLine(child1_write_pipe, child2_write_pipe, line, &line_size);
+        int pipe_to_send;
 
-                continue;
-            }
-
-            line[line_size] = buffer[i];
-            ++line_size;
+        if (rand() % 100 < PROBABILITY) {
+            pipe_to_send = child1_write_pipe;
+        } else {
+            pipe_to_send = child2_write_pipe;
         }
-    }
 
-    if (line_size > 0) {
-        WriteLine(child1_write_pipe, child2_write_pipe, line, &line_size);
+        ssize_t written = write(pipe_to_send, buffer, bytes_read);
+
+        if (written != bytes_read) {
+            char message[] = "[ERROR] Can`t send all text from parent to child process!\n";
+            write(STDOUT_FILENO, message, sizeof(message));
+
+            break;
+        }
     }
 
     return 0;
@@ -162,8 +137,8 @@ int main(void) {
     }
 
     // parent
-    int result = ProcessInput(child1_pipes[1],
-                              child2_pipes[1]);
+    int32_t result = ProcessInput(child1_pipes[1],
+                                  child2_pipes[1]);
 
     write(child1_pipes[1], EXIT_MESSAGE, sizeof(EXIT_MESSAGE));
     write(child2_pipes[1], EXIT_MESSAGE, sizeof(EXIT_MESSAGE));

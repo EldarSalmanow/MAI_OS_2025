@@ -18,21 +18,6 @@ void InvertString(char *buffer,
     }
 }
 
-ssize_t WriteLine(int file,
-                  char *line,
-                  uint64_t *line_size) {
-    InvertString(line, *line_size);
-
-    line[*line_size] = '\n';
-    ++*line_size;
-
-    ssize_t written = write(file, line, *line_size);
-
-    *line_size = 0;
-
-    return written;
-}
-
 int main(int argc,
          char **argv) {
     if (argc != 1) {
@@ -54,32 +39,23 @@ int main(int argc,
     }
 
     char buffer[MAX_BUFFER_SIZE];
-    char line[MAX_BUFFER_SIZE];
-    uint64_t line_size = 0;
     ssize_t bytes_read = 0;
 
-    while ((bytes_read = read(STDIN_FILENO, buffer, MAX_BUFFER_SIZE - 1)) > 0) {
-        buffer[bytes_read] = '\0';
-
-        if (strcmp(buffer, EXIT_MESSAGE) == 0) {
+    while ((bytes_read = read(STDIN_FILENO, buffer, MAX_BUFFER_SIZE)) > 0) {
+        if (strncmp(buffer, EXIT_MESSAGE, sizeof(EXIT_MESSAGE) - 1) == 0) {
             break;
         }
 
-        for (ssize_t i = 0; i < bytes_read; ++i) {
-            if (buffer[i] == '\n'
-             || line_size + 1 >= MAX_BUFFER_SIZE) {
-                WriteLine(file, line, &line_size);
+        InvertString(buffer, bytes_read - 1);
 
-                continue;
-            }
+        ssize_t written = write(file, buffer, bytes_read);
 
-            line[line_size] = buffer[i];
-            ++line_size;
+        if (written != bytes_read) {
+            char message[] = "[ERROR] Can`t write all text to file!\n";
+            write(STDOUT_FILENO, message, sizeof(message));
+
+            break;
         }
-    }
-
-    if (line_size > 0) {
-        WriteLine(file, line, &line_size);
     }
 
     close(file);
