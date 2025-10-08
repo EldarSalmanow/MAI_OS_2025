@@ -8,3 +8,4 @@ include(cmake/Utils.cmake)
 setup_project()
 
 add_subdirectory(lab1)
+add_subdirectory(lab2)

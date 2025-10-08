@@ -104,10 +104,19 @@ int main(void) {
 
     // child1
     if (pid1 == 0) {
+        close(child1_pipes[1]);
+        close(child2_pipes[0]);
+        close(child2_pipes[1]);
+
         dup2(child1_pipes[0], STDIN_FILENO);
+        close(child1_pipes[0]);
+
         execl("./child", filename1, NULL);
 
-        return 0;
+        char message[] = "[ERROR] Failed executing of first child!\n";
+        write(STDOUT_FILENO, message, sizeof(message));
+
+        return 1;
     }
 
     pid2 = fork();
@@ -130,11 +139,23 @@ int main(void) {
 
     // child2
     if (pid2 == 0) {
+        close(child2_pipes[1]);
+        close(child1_pipes[0]);
+        close(child1_pipes[1]);
+
         dup2(child2_pipes[0], STDIN_FILENO);
+        close(child2_pipes[0]);
+
         execl("./child", filename2, NULL);
 
-        return 0;
+        char message[] = "[ERROR] Failed executing of second child!\n";
+        write(STDOUT_FILENO, message, sizeof(message));
+
+        return 1;
     }
+
+    close(child1_pipes[0]);
+    close(child2_pipes[0]);
 
     // parent
     int32_t result = ProcessInput(child1_pipes[1],
@@ -146,9 +167,7 @@ int main(void) {
     waitpid(pid1, NULL, 0);
     waitpid(pid2, NULL, 0);
 
-    close(child1_pipes[0]);
     close(child1_pipes[1]);
-    close(child2_pipes[0]);
     close(child2_pipes[1]);
 
     return result;
