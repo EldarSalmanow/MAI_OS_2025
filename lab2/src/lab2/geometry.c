@@ -140,7 +140,7 @@ Triangle MaxTriangle(Points points,
         exit(EXIT_FAILURE);
     }
 
-    pthread_t *threads = malloc(threads_count * sizeof(pthread_t));
+    pthread_t *threads = (pthread_t *) malloc(threads_count * sizeof(pthread_t));
 
     if (!threads) {
         free(points.data);
