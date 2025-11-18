@@ -6,39 +6,24 @@ set(INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/include)
 set(SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src)
 set(TESTS_DIR ${CMAKE_CURRENT_SOURCE_DIR}/tests)
 
-#add_lab(1
-#        CLI_SOURCES child.c parent.c
-#        LIB_SOURCES child.c parent.c
-#)
-
-#add_cli_app(
-#        LAB_NUM 1
-#        CLI_NAME parent
-#        CLI_SOURCES parent.c
-#        LIB_SOURCES parent.c
-#)
-#
-#add_cli_app(
-#        LAB_NUM 1
-#        CLI_NAME child
-#        CLI_SOURCES child.c
-#        LIB_SOURCES child.c
-#)
-
-add_executable(parent
+add_executable(lab1_parent
         cli/parent.c
 )
 
-target_include_directories(parent
+target_include_directories(lab1_parent
         PRIVATE
         ${INCLUDE_DIR}
 )
 
-add_executable(child
+set_target_properties(lab1_parent PROPERTIES OUTPUT_NAME "parent")
+
+add_executable(lab1_child
         cli/child.c
 )
 
-target_include_directories(child
+target_include_directories(lab1_child
         PRIVATE
         ${INCLUDE_DIR}
 )
+
+set_target_properties(lab1_child PROPERTIES OUTPUT_NAME "child")
