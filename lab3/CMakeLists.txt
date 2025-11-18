@@ -15,6 +15,11 @@ target_include_directories(lab3_parent
         ${INCLUDE_DIR}
 )
 
+target_link_libraries(lab3_parent
+        PRIVATE
+        pthread rt
+)
+
 set_target_properties(lab3_parent PROPERTIES OUTPUT_NAME "parent")
 
 add_executable(lab3_child
@@ -24,6 +29,11 @@ add_executable(lab3_child
 target_include_directories(lab3_child
         PRIVATE
         ${INCLUDE_DIR}
+)
+
+target_link_libraries(lab3_child
+        PRIVATE
+        pthread rt
 )
 
 set_target_properties(lab3_child PROPERTIES OUTPUT_NAME "child")

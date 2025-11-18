@@ -1,13 +1,28 @@
+#include <fcntl.h>
+#include <semaphore.h>
 #include <stdint.h>
-#include <unistd.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/mman.h>
 #include <sys/wait.h>
+#include <unistd.h>
 
-#include <lab1/messages.h>
+#include <lab1/constants.h>
 
-#define MAX_BUFFER_SIZE 4096
 #define PROBABILITY 80
+
+
+int32_t WriteMessage(char *buffer,
+                     const char *text,
+                     sem_t *semaphore) {
+    sem_wait(semaphore);
+
+    memcpy(buffer, text, strlen(text) + 1);
+
+    sem_post(semaphore);
+
+    return 0;
+}
 
 ssize_t ReadFilename(char *buffer) {
     ssize_t size = read(STDIN_FILENO, buffer, MAX_BUFFER_SIZE);
@@ -25,35 +40,52 @@ ssize_t ReadFilename(char *buffer) {
     return size;
 }
 
-int32_t ProcessInput(int child1_write_pipe,
-                     int child2_write_pipe) {
-    char buffer[MAX_BUFFER_SIZE];
-    ssize_t bytes_read = 0;
+int32_t ProcessInput(char *buffer,
+                     sem_t *semaphore) {
+    char text[MAX_BUFFER_SIZE] = {0};
 
-    while ((bytes_read = read(STDIN_FILENO, buffer, MAX_BUFFER_SIZE)) > 0) {
-        if (strncmp(buffer, EXIT_MESSAGE, sizeof(EXIT_MESSAGE) - 1) == 0) {
+    while (read(STDIN_FILENO, text + 1, MAX_MESSAGE_SIZE) > 0) {
+        if (strncmp(text + 1, EXIT_MESSAGE, sizeof(EXIT_MESSAGE) - 1) == 0) {
             break;
         }
 
-        int pipe_to_send;
+        char process_to_send = rand() % 100 < PROBABILITY ? '1' : '2';
 
-        if (rand() % 100 < PROBABILITY) {
-            pipe_to_send = child1_write_pipe;
-        } else {
-            pipe_to_send = child2_write_pipe;
-        }
+        text[0] = process_to_send;
 
-        ssize_t written = write(pipe_to_send, buffer, bytes_read);
+        WriteMessage(buffer, text, semaphore);
 
-        if (written != bytes_read) {
-            char message[] = "[ERROR] Can`t send all text from parent to child process!\n";
-            write(STDOUT_FILENO, message, sizeof(message));
-
-            break;
-        }
+        memset(text, 0, MAX_BUFFER_SIZE);
     }
 
     return 0;
+}
+
+void UnlinkMemory(const char *name) {
+    if (shm_unlink(name) != 0) {
+        char message[] = "[ERROR] Can`t unlink shared memory!\n";
+        write(STDOUT_FILENO, message, sizeof(message));
+    }
+}
+
+void UnmapMemory(void *buffer,
+                 size_t length) {
+    if (munmap(buffer, length) != 0) {
+        char message[] = "[ERROR] Can`t unmap shared memory!\n";
+        write(STDOUT_FILENO, message, sizeof(message));
+    }
+}
+
+void CloseSemaphore(sem_t *semaphore) {
+    if (sem_unlink(SEMAPHORE_NAME) != 0) {
+        char message[] = "[ERROR] Can`t unlink semaphore!\n";
+        write(STDOUT_FILENO, message, sizeof(message));
+    }
+
+    if (sem_close(semaphore) != 0) {
+        char message[] = "[ERROR] Can`t close semaphore!\n";
+        write(STDOUT_FILENO, message, sizeof(message));
+    }
 }
 
 int main(void) {
@@ -67,20 +99,56 @@ int main(void) {
         return 1;
     }
 
-    int child1_pipes[2], child2_pipes[2];
+    int shared_memory = shm_open(SHARED_MEMORY_NAME,
+                                 O_RDWR | O_CREAT | O_TRUNC,
+                                 S_IRUSR | S_IWUSR);
 
-    if (pipe(child1_pipes) == -1) {
-        char message[] = "[ERROR] Can`t create pipes for first child process!\n";
+    if (shared_memory == -1) {
+        char message[] = "[ERROR] Can`t create shared memory!\n";
         write(STDOUT_FILENO, message, sizeof(message));
 
         return 1;
     }
 
-    if (pipe(child2_pipes) == -1) {
-        close(child1_pipes[0]);
-        close(child1_pipes[1]);
+    if (ftruncate(shared_memory, MAX_BUFFER_SIZE) == -1) {
+        UnlinkMemory(SHARED_MEMORY_NAME);
 
-        char message[] = "[ERROR] Can`t create pipes for second child process!\n";
+        char message[] = "[ERROR] Can`t truncate shared memory!\n";
+        write(STDOUT_FILENO, message, sizeof(message));
+
+        return 1;
+    }
+
+    char *buffer = mmap(NULL,
+                        MAX_BUFFER_SIZE,
+                        PROT_WRITE,
+                        MAP_SHARED,
+                        shared_memory,
+                        0);
+
+    if (buffer == MAP_FAILED) {
+        UnlinkMemory(SHARED_MEMORY_NAME);
+
+        char message[] = "[ERROR] Can`t map shared memory!\n";
+        write(STDOUT_FILENO, message, sizeof(message));
+
+        return 1;
+    }
+
+    memset(buffer, 0, MAX_BUFFER_SIZE);
+
+    sem_unlink(SEMAPHORE_NAME);
+
+    sem_t *semaphore = sem_open(SEMAPHORE_NAME,
+                                O_RDWR | O_CREAT | O_TRUNC,
+                                S_IRUSR | S_IWUSR,
+                                1);
+
+    if (semaphore == SEM_FAILED) {
+        UnmapMemory(buffer, MAX_BUFFER_SIZE);
+        UnlinkMemory(SHARED_MEMORY_NAME);
+
+        char message[] = "[ERROR] Can`t create semaphore!\n";
         write(STDOUT_FILENO, message, sizeof(message));
 
         return 1;
@@ -91,10 +159,9 @@ int main(void) {
     pid1 = fork();
 
     if (pid1 == -1) {
-        close(child1_pipes[0]);
-        close(child1_pipes[1]);
-        close(child2_pipes[0]);
-        close(child2_pipes[1]);
+        CloseSemaphore(semaphore);
+        UnmapMemory(buffer, MAX_BUFFER_SIZE);
+        UnlinkMemory(SHARED_MEMORY_NAME);
 
         char message[] = "[ERROR] Can`t create first child process!\n";
         write(STDOUT_FILENO, message, sizeof(message));
@@ -104,14 +171,11 @@ int main(void) {
 
     // child1
     if (pid1 == 0) {
-        close(child1_pipes[1]);
-        close(child2_pipes[0]);
-        close(child2_pipes[1]);
+        execl("./child", "1", filename1, NULL);
 
-        dup2(child1_pipes[0], STDIN_FILENO);
-        close(child1_pipes[0]);
-
-        execl("./child", filename1, NULL);
+        CloseSemaphore(semaphore);
+        UnmapMemory(buffer, MAX_BUFFER_SIZE);
+        UnlinkMemory(SHARED_MEMORY_NAME);
 
         char message[] = "[ERROR] Failed executing of first child!\n";
         write(STDOUT_FILENO, message, sizeof(message));
@@ -122,14 +186,13 @@ int main(void) {
     pid2 = fork();
 
     if (pid2 == -1) {
-        write(child1_pipes[1], EXIT_MESSAGE, sizeof(EXIT_MESSAGE));
+        WriteMessage(buffer, EXIT_MESSAGE, semaphore);
 
         waitpid(pid1, NULL, 0);
 
-        close(child1_pipes[0]);
-        close(child1_pipes[1]);
-        close(child2_pipes[0]);
-        close(child2_pipes[1]);
+        CloseSemaphore(semaphore);
+        UnmapMemory(buffer, MAX_BUFFER_SIZE);
+        UnlinkMemory(SHARED_MEMORY_NAME);
 
         char message[] = "[ERROR] Can`t create second child process!\n";
         write(STDOUT_FILENO, message, sizeof(message));
@@ -139,14 +202,11 @@ int main(void) {
 
     // child2
     if (pid2 == 0) {
-        close(child2_pipes[1]);
-        close(child1_pipes[0]);
-        close(child1_pipes[1]);
+        execl("./child", "2", filename2, NULL);
 
-        dup2(child2_pipes[0], STDIN_FILENO);
-        close(child2_pipes[0]);
-
-        execl("./child", filename2, NULL);
+        CloseSemaphore(semaphore);
+        UnmapMemory(buffer, MAX_BUFFER_SIZE);
+        UnlinkMemory(SHARED_MEMORY_NAME);
 
         char message[] = "[ERROR] Failed executing of second child!\n";
         write(STDOUT_FILENO, message, sizeof(message));
@@ -154,21 +214,17 @@ int main(void) {
         return 1;
     }
 
-    close(child1_pipes[0]);
-    close(child2_pipes[0]);
-
     // parent
-    int32_t result = ProcessInput(child1_pipes[1],
-                                  child2_pipes[1]);
+    int32_t result = ProcessInput(buffer, semaphore);
 
-    write(child1_pipes[1], EXIT_MESSAGE, sizeof(EXIT_MESSAGE));
-    write(child2_pipes[1], EXIT_MESSAGE, sizeof(EXIT_MESSAGE));
+    WriteMessage(buffer, EXIT_MESSAGE, semaphore);
 
     waitpid(pid1, NULL, 0);
     waitpid(pid2, NULL, 0);
 
-    close(child1_pipes[1]);
-    close(child2_pipes[1]);
+    CloseSemaphore(semaphore);
+    UnmapMemory(buffer, MAX_BUFFER_SIZE);
+    UnlinkMemory(SHARED_MEMORY_NAME);
 
     return result;
 }
